@@ -5,13 +5,14 @@ services:
     build: ./db
     container_name: tienda-db
     environment:
-      POSTGRES_USER: tienda_user
-      POSTGRES_PASSWORD: tienda_pass
-      POSTGRES_DB: tienda_db
+      MYSQL_ROOT_PASSWORD: admin123
+      MYSQL_DATABASE: tienda_perritos
+      MYSQL_USER: alumno
+      MYSQL_PASSWORD: alumno123
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - db_data:/var/lib/mysql
     networks:
       - tienda-network
 
@@ -22,13 +23,13 @@ services:
       - db
     environment:
       DB_HOST: db
-      DB_USER: tienda_user
-      DB_PASSWORD: tienda_pass
-      DB_NAME: tienda_db
-      DB_PORT: 5432
+      DB_USER: alumno
+      DB_PASSWORD: alumno123
+      DB_NAME: tienda_perritos
+      DB_PORT: 3306
       NODE_ENV: production
     ports:
-      - "5000:5000"
+      - "3001:3001"
     networks:
       - tienda-network
 
@@ -39,8 +40,6 @@ services:
       - backend
     ports:
       - "3000:80"
-    environment:
-      BACKEND_URL: http://backend:5000
     networks:
       - tienda-network
 

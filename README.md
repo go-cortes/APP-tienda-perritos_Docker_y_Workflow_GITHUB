@@ -11,8 +11,7 @@ Aplicación de e-commerce "Tienda Perritos" (proyecto Innovatech Chile) con arqu
 ## 🏛 1. Arquitectura y Políticas de Seguridad (AWS)
 El proyecto se despliega de forma distribuida en **tres instancias EC2 de AWS**. Se implementó un diseño de red estricto basado en **Security Groups (SGs)** encadenados para garantizar el principio de mínimo privilegio: solo el Frontend es accesible desde Internet, aislando completamente la lógica de negocio y los datos.
 
-*(Sugerencia: Reemplaza esta línea con la ruta real de tu imagen)*
-`![Diagrama de Arquitectura](./docs/arquitectura.png)`
+![Diagrama de Arquitectura](./docs/arquitectura.jpg)
 
 ### Configuración de Security Groups:
 - 🌐 **Frontend EC2 (`FRONT-SG`):** 
@@ -57,8 +56,7 @@ Para garantizar la continuidad operativa ante reinicios o actualizaciones autom�
 ## 🚀 4. Integración y Despliegue Continuo (CI/CD)
 La entrega del software está 100% automatizada mediante **GitHub Actions**, segmentada por capa mediante *path triggers*. 
 
-*(Sugerencia: Reemplaza esta línea con la ruta real de tu imagen)*
-`![Flujo CI/CD](./docs/flujo-cicd.png)`
+![Flujo CI/CD](./docs/flujo-cicd.jpg)
 
 ### Flujo del Pipeline (Archivos YAML)
 Contamos con 3 workflows independientes (`cicd-tienda-frontend.yml`, `cicd-tienda-backend.yml`, `cicd-tienda-db.yml`). El flujo es:

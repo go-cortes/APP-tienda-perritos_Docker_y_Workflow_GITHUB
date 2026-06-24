@@ -6,45 +6,60 @@ on:
     paths:
       - "db/**"
 
+env:
+  ECR_REGISTRY: 115917394410.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPO_DB: tienda-db
+  EKS_NAMESPACE: tienda
+
 jobs:
   build-push-deploy-db:
+    name: Build, Push y Deploy DB
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout código
-      uses: actions/checkout@v3
+      - name: Checkout código
+        uses: actions/checkout@v4
 
-    - name: Configurar credenciales AWS
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-        aws-region: ${{ secrets.AWS_REGION }}
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
 
-    - name: Login en Amazon ECR (runner)
-      uses: aws-actions/amazon-ecr-login@v1
+      - name: Login en Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build imagen DB y push a ECR
-      run: |
-        cd db
-        docker build -t tienda-db .
-        docker tag tienda-db:latest ${{ secrets.ECR_REPO_URL_DB }}:latest
-        docker push ${{ secrets.ECR_REPO_URL_DB }}:latest
+      - name: Definir tag de imagen
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
-    - name: Desplegar DB vía SSM
-      run: |
-        aws ssm send-command \
-          --instance-ids ${{ secrets.EC2_DB_INSTANCE_ID }} \
-          --document-name "AWS-RunShellScript" \
-          --comment "Actualizar tienda-db desde ECR" \
-          --parameters '{"commands":[
-            "set -e",
-            "aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}",
-            "docker pull ${{ secrets.ECR_REPO_URL_DB }}:latest",
-            "docker stop tienda-db || true",
-            "docker rm tienda-db || true",
-            "docker run -d --name tienda-db -p 3306:3306 -v dbdata:/var/lib/mysql ${{ secrets.ECR_REPO_URL_DB }}:latest"
-          ]}' \
-          --region ${{ secrets.AWS_REGION }} \
-          --output text
+      - name: Build imagen DB y push a ECR
+        run: |
+          cd db
+          docker build -t $ECR_REGISTRY/$ECR_REPO_DB:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPO_DB:$IMAGE_TAG
+          echo "✅ DB image pushed: $ECR_REGISTRY/$ECR_REPO_DB:$IMAGE_TAG"
+
+      - name: Instalar kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      - name: Conectar al cluster EKS
+        run: |
+          aws eks update-kubeconfig --region us-east-1 --name tienda-eks
+          echo "✅ Conectado a tienda-eks"
+
+      - name: Deploy MySQL en EKS
+        run: |
+          kubectl apply -f k8s/mysql-secret.yaml -n $EKS_NAMESPACE
+          kubectl apply -f k8s/mysql-deployment.yaml -n $EKS_NAMESPACE
+          kubectl apply -f k8s/mysql-service.yaml -n $EKS_NAMESPACE
+          echo "✅ MySQL secret y deployment aplicados"
+
+      - name: Ver estado pods DB
+        run: |
+          kubectl get pods -n $EKS_NAMESPACE -l app=tienda-db
+          kubectl get svc tienda-db -n $EKS_NAMESPACE

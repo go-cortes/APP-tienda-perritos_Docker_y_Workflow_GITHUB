@@ -1,0 +1,148 @@
+name: CI/CD Tienda Perritos EKS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 115917394410.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPO_FRONTEND: tienda-frontend
+  ECR_REPO_BACKEND: tienda-backend
+  ECR_REPO_DB: tienda-db
+  EKS_CLUSTER_NAME: tienda-eks
+  EKS_NAMESPACE: tienda
+
+jobs:
+  build-and-deploy:
+    name: Build, Push y Deploy en EKS
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout del código
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      # 2. Configurar credenciales AWS (AWS Academy requiere session token)
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      # 3. Login a Amazon ECR
+      - name: Login a Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # 4. Definir tag único por commit (primeros 7 caracteres del SHA)
+      - name: Definir tag de imagen
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      # ========== FRONTEND ==========
+      - name: Build y Push FRONTEND
+        run: |
+          cd frontend
+          docker build -t $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG
+          echo "✅ Frontend image pushed: $ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG"
+
+      # ========== BACKEND ==========
+      - name: Build y Push BACKEND
+        run: |
+          cd backend
+          docker build -t $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG
+          echo "✅ Backend image pushed: $ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG"
+
+      # ========== BASE DE DATOS ==========
+      - name: Build y Push DB
+        run: |
+          cd db
+          docker build -t $ECR_REGISTRY/$ECR_REPO_DB:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPO_DB:$IMAGE_TAG
+          echo "✅ DB image pushed: $ECR_REGISTRY/$ECR_REPO_DB:$IMAGE_TAG"
+
+      # ========== INSTALAR KUBECTL ==========
+      - name: Instalar kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.0
+
+      # ========== CONECTAR AL CLUSTER EKS ==========
+      - name: Configurar kubeconfig para EKS
+        run: |
+          aws eks update-kubeconfig \
+            --region us-east-1 \
+            --name tienda-eks
+          kubectl config current-context
+          echo "✅ Conectado al cluster tienda-eks"
+
+      # ========== NAMESPACE Y SECRETOS BASE ==========
+      - name: Aplicar namespace y secretos
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/mysql-secret.yaml -n $EKS_NAMESPACE
+          echo "✅ Namespace y secrets aplicados"
+
+      # ========== DESPLEGAR DB ==========
+      - name: Desplegar Base de Datos MySQL
+        run: |
+          kubectl apply -f k8s/mysql-deployment.yaml -n $EKS_NAMESPACE
+          kubectl apply -f k8s/mysql-service.yaml -n $EKS_NAMESPACE
+          echo "✅ MySQL desplegado"
+
+      # ========== DESPLEGAR BACKEND ==========
+      - name: Desplegar y actualizar BACKEND en EKS
+        run: |
+          kubectl apply -f k8s/backend-deployment.yaml -n $EKS_NAMESPACE
+          kubectl apply -f k8s/backend-service.yaml -n $EKS_NAMESPACE
+          kubectl set image deployment/tienda-backend \
+            backend=$ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG \
+            -n $EKS_NAMESPACE
+          kubectl rollout status deployment/tienda-backend -n $EKS_NAMESPACE --timeout=120s
+          echo "✅ Backend actualizado a imagen: $IMAGE_TAG"
+
+      # ========== DESPLEGAR FRONTEND ==========
+      - name: Desplegar y actualizar FRONTEND en EKS
+        run: |
+          kubectl apply -f k8s/frontend-deployment.yaml -n $EKS_NAMESPACE
+          kubectl apply -f k8s/frontend-service.yaml -n $EKS_NAMESPACE
+          kubectl set image deployment/tienda-frontend \
+            frontend=$ECR_REGISTRY/$ECR_REPO_FRONTEND:$IMAGE_TAG \
+            -n $EKS_NAMESPACE
+          kubectl rollout status deployment/tienda-frontend -n $EKS_NAMESPACE --timeout=120s
+          echo "✅ Frontend actualizado a imagen: $IMAGE_TAG"
+
+      # ========== HPA (Autoscaling) ==========
+      - name: Aplicar HPA (Autoscaling)
+        run: |
+          if [ -f k8s/backend-hpa.yaml ]; then
+            kubectl apply -f k8s/backend-hpa.yaml -n $EKS_NAMESPACE
+            echo "✅ HPA Backend aplicado"
+          fi
+          if [ -f k8s/frontend-hpa.yaml ]; then
+            kubectl apply -f k8s/frontend-hpa.yaml -n $EKS_NAMESPACE
+            echo "✅ HPA Frontend aplicado"
+          fi
+
+      # ========== VERIFICAR ESTADO FINAL ==========
+      - name: Ver estado final del despliegue
+        run: |
+          echo "========== NODOS =========="
+          kubectl get nodes
+          echo "========== PODS =========="
+          kubectl get pods -n $EKS_NAMESPACE
+          echo "========== SERVICIOS =========="
+          kubectl get svc -n $EKS_NAMESPACE
+          echo "========== HPA =========="
+          kubectl get hpa -n $EKS_NAMESPACE || echo "No hay HPA configurado"
+          echo ""
+          echo "🌐 URL Frontend (LoadBalancer):"
+          kubectl get svc tienda-frontend -n $EKS_NAMESPACE \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+          echo ""
+          echo "🚀 Deploy completado con imagen tag: $IMAGE_TAG"

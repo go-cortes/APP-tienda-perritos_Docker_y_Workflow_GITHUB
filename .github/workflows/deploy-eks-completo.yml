@@ -92,6 +92,7 @@ jobs:
       - name: Desplegar Base de Datos MySQL
         run: |
           kubectl apply -f k8s/mysql-deployment.yaml -n $EKS_NAMESPACE
+          kubectl delete service tienda-db -n $EKS_NAMESPACE --ignore-not-found=true
           kubectl apply -f k8s/mysql-service.yaml -n $EKS_NAMESPACE
           echo "✅ MySQL desplegado"
 
@@ -99,6 +100,7 @@ jobs:
       - name: Desplegar y actualizar BACKEND en EKS
         run: |
           kubectl apply -f k8s/backend-deployment.yaml -n $EKS_NAMESPACE
+          kubectl delete service tienda-backend -n $EKS_NAMESPACE --ignore-not-found=true
           kubectl apply -f k8s/backend-service.yaml -n $EKS_NAMESPACE
           kubectl set image deployment/tienda-backend \
             backend=$ECR_REGISTRY/$ECR_REPO_BACKEND:$IMAGE_TAG \

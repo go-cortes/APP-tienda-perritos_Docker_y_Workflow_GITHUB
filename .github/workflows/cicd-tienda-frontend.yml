@@ -7,7 +7,7 @@ on:
       - "frontend/**"
 
 env:
-  ECR_REGISTRY: 115917394410.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REGISTRY: 277070702488.dkr.ecr.us-east-1.amazonaws.com
   ECR_REPO_FRONTEND: tienda-frontend
   EKS_NAMESPACE: tienda
 

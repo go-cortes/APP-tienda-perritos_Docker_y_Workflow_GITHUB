@@ -1,98 +1,67 @@
-# 🐾 Tienda Perritos - Infraestructura DevOps & Despliegue Automatizado
+# Tienda de Perritos - AWS EKS & CI/CD 🐶
 
-[![CI/CD Frontend](https://img.shields.io/badge/CI%2FCD-Frontend-success?logo=github)](https://github.com/go-cortes/APP-tienda-perritos_Docker_y_Workflow_GITHUB/actions)
-[![CI/CD Backend](https://img.shields.io/badge/CI%2FCD-Backend-success?logo=github)](https://github.com/go-cortes/APP-tienda-perritos_Docker_y_Workflow_GITHUB/actions)
-[![CI/CD DB](https://img.shields.io/badge/CI%2FCD-DB-success?logo=github)](https://github.com/go-cortes/APP-tienda-perritos_Docker_y_Workflow_GITHUB/actions)
+Este proyecto es una aplicación web multicapa (Frontend, Backend, Base de Datos) contenerizada y orquestada en **Amazon EKS (Elastic Kubernetes Service)**. Fue desarrollada como parte de la **Actividad 3.2: Implementación de clústeres de contenedores en AWS con EKS**.
 
-Aplicación de e-commerce "Tienda Perritos" (proyecto Innovatech Chile) con arquitectura de microservicios. Este repositorio contiene el código fuente y toda la automatización DevOps para su integración y despliegue continuo (CI/CD) en Amazon Web Services (AWS).
+## 🏗️ Arquitectura del Proyecto
 
----
+El sistema está compuesto por tres capas principales:
+1. **Frontend**: Aplicación estática servida con NGINX que actúa como proxy reverso hacia el backend.
+2. **Backend**: API construida en Node.js/Express que gestiona las operaciones CRUD de los productos.
+3. **Base de Datos**: MySQL (Desplegado en el clúster con un volumen efímero/EmptyDir para pruebas).
 
-## 🏛 1. Arquitectura y Políticas de Seguridad (AWS)
-El proyecto se despliega de forma distribuida en **tres instancias EC2 de AWS**. Se implementó un diseño de red estricto basado en **Security Groups (SGs)** encadenados para garantizar el principio de mínimo privilegio: solo el Frontend es accesible desde Internet, aislando completamente la lógica de negocio y los datos.
+![Diagrama de Arquitectura EKS](architecture_diagram_eks_1782271629658.png)
 
-![Diagrama de Arquitectura](./docs/arquitectura.jpg)
+## 🗂️ Estructura del Repositorio
 
-### Configuración de Security Groups:
-- 🌐 **Frontend EC2 (`FRONT-SG`):** 
-  - **Acceso:** Público (Internet).
-  - **Reglas:** Permite tráfico entrante desde cualquier origen (`0.0.0.0/0`) a los puertos `80` y `8080` (HTTP), además del puerto `22` (SSH) para administración.
-  
-- 🔒 **Backend EC2 (`BACKENS-SG`):** 
-  - **Acceso:** Restringido (Subred Privada lógica).
-  - **Reglas:** **NO** posee acceso abierto a Internet. Solo permite tráfico entrante en el puerto `3001` (API) y `22` (SSH) **exclusivamente desde el Security Group del Frontend (`sg-028e70f7cb2d3044a`)**.
+- `/frontend`: Código fuente de la interfaz web, configuración de NGINX (`default.conf`) y su `Dockerfile`.
+- `/backend`: Código fuente de la API Node.js y su `Dockerfile`.
+- `/db`: Archivos de configuración inicial para la base de datos MySQL (si aplica) y `Dockerfile`.
+- `/k8s`: Manifiestos YAML de Kubernetes para el despliegue de toda la infraestructura:
+  - Deployments, Services, ConfigMaps, Secrets.
+  - Horizontal Pod Autoscaler (HPA) para Frontend y Backend.
+- `/.github/workflows`: Pipeline de CI/CD automatizado con GitHub Actions.
 
-- 🗄️ **Base de Datos EC2 (`BD-SG`):** 
-  - **Acceso:** Altamente Restringido.
-  - **Reglas:** Solo permite tráfico entrante en el puerto `3306` (MySQL) **exclusivamente desde el Security Group del Backend (`sg-0d6c601cea573419f`)**.
+## 🚀 Flujo CI/CD (GitHub Actions)
 
-### Aprovisionamiento Automatizado (User Data)
-Para cumplir con el principio DevOps de minimizar la configuración manual, las tres instancias EC2 fueron aprovisionadas utilizando un script de **User Data** durante su lanzamiento. Este script asegura que la infraestructura nazca lista para operar, ejecutando automáticamente:
-- Actualización del sistema operativo (`yum update -y`).
-- Instalación de dependencias clave (**Docker** y **Git**).
-- Configuración de permisos: Se agrega el `ec2-user` al grupo `docker` (`usermod -aG docker ec2-user`) para permitir la ejecución del pipeline sin necesidad de escalado de privilegios.
-- Instalación del plugin oficial de **Docker Compose v2** directamente en el directorio del usuario.
+El proyecto cuenta con integración y despliegue continuo. Al hacer push a la rama `main`:
+1. **GitHub Actions** detecta los cambios.
+2. Construye la nueva imagen Docker (`frontend` o `backend`).
+3. Sube la imagen a **Amazon ECR** etiquetada con el SHA del commit.
+4. Se conecta al clúster de **EKS** y actualiza el Deployment (`kubectl set image`) de forma automática sin caída del servicio (Rolling Update).
 
-Gracias a esto, las instancias están preparadas desde el segundo cero para recibir instrucciones de despliegue a través de AWS SSM.
+## ⚙️ Despliegue Manual en Kubernetes (EKS)
 
----
+Si deseas levantar el entorno de forma manual, asegúrate de estar conectado a tu clúster EKS y ejecuta los siguientes comandos desde la carpeta `k8s`:
 
-## 🐳 2. Estrategia de Contenedorización (Docker)
-Todo el ecosistema de la aplicación fue empaquetado utilizando Docker. Esto nos permite separar las responsabilidades (Frontend, Backend y Base de Datos) y asegurar que el código se ejecute de la misma manera en un entorno de desarrollo local que en la infraestructura de AWS.
+### 1. Base de Datos (MySQL)
+```bash
+kubectl apply -f mysql-secret.yaml
+kubectl apply -f mysql-deployment.yaml
+kubectl apply -f mysql-service.yaml
+```
 
-- **Imágenes Base:** Se utilizaron imágenes estándar como Node.js y Nginx para empaquetar las aplicaciones de forma rápida y funcional.
-- **Orquestación Local (`docker-compose.yml`):** El archivo en la raíz del proyecto permite levantar todo el stack de manera local con un solo comando. Este archivo gestiona la red interna, las variables de entorno y los volúmenes, facilitando las pruebas antes de subir cambios al repositorio.
+### 2. Backend (Node.js)
+```bash
+kubectl apply -f backend-deployment.yaml
+kubectl apply -f backend-service.yaml
+```
 
----
+### 3. Frontend (NGINX)
+```bash
+kubectl apply -f frontend-deployment.yaml
+kubectl apply -f frontend-service.yaml
+```
+Para obtener la URL de acceso de la aplicación:
+```bash
+kubectl get svc tienda-frontend -n tienda
+```
+Copia el valor de `EXTERNAL-IP` (LoadBalancer) y ábrelo en tu navegador.
 
-## 💾 3. Persistencia de Datos
-Para garantizar la continuidad operativa ante reinicios o actualizaciones automáticas, se implementaron **Volúmenes de Docker**.
+## 📈 Autoescalado y Tolerancia a Fallos
 
-- **Implementación:** Se utiliza un *Named Volume* (`dbdata`) montado en el contenedor de la Base de Datos.
-- **Justificación técnica:** A diferencia de un *bind mount*, un *named volume* es administrado por Docker, lo que lo hace más seguro y portable. Esto asegura que si GitHub Actions actualiza la imagen de la base de datos (haciendo `stop` y `rm` del contenedor anterior), **los registros de los productos no se pierdan** al levantar la nueva versión del contenedor.
+- **Auto-healing**: Kubernetes monitorea la salud de los contenedores a través de `livenessProbe` y `readinessProbe`. Si un contenedor falla, es recreado automáticamente por su respectivo ReplicaSet.
+- **HPA (Horizontal Pod Autoscaler)**: Configurado para el Backend y Frontend. Cuando el consumo de CPU supera el umbral definido (ej. 70%), EKS escala automáticamente la cantidad de réplicas de los pods.
 
----
-
-## 🚀 4. Integración y Despliegue Continuo (CI/CD)
-La entrega del software está 100% automatizada mediante **GitHub Actions**, segmentada por capa mediante *path triggers*. 
-
-![Flujo CI/CD](./docs/flujo-cicd.jpg)
-
-### Flujo del Pipeline (Archivos YAML)
-Contamos con 3 workflows independientes (`cicd-tienda-frontend.yml`, `cicd-tienda-backend.yml`, `cicd-tienda-db.yml`). El flujo es:
-
-1. **Trigger:** `on: push` en la rama `main` (o `deploy`), condicionado a cambios exclusivos en su respectiva carpeta (ej. `paths: ['backend/**']`).
-2. **Build & Push a Amazon ECR:** 
-   - El *runner* de GitHub compila la imagen Docker.
-   - **Justificación de ECR:** Se eligió **Amazon ECR** sobre Docker Hub por ser un registro 100% privado, con integración nativa a AWS IAM para un control de acceso seguro y de alta velocidad de descarga hacia las instancias EC2.
-3. **Deploy Automático vía AWS SSM:** 
-   - En lugar de utilizar conexiones SSH estáticas (que requieren abrir puertos y gestionar llaves), el pipeline utiliza `aws ssm send-command` para ejecutar instrucciones de forma segura dentro de la instancia EC2 remota.
-   - La EC2 inicia sesión en ECR, hace un `docker pull` de la nueva imagen, detiene/elimina el contenedor antiguo y levanta el nuevo (`docker run -d`).
-
-### 🔐 Seguridad y Gestión de Secrets
-Ninguna credencial está expuesta en el código fuente. Utilizamos **GitHub Secrets** para inyectar en tiempo de ejecución:
-- Credenciales AWS: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_REGION`.
-- URLs del Registry: `ECR_REPO_URL_FRONTEND`, `ECR_REPO_URL_BACKEND`, `ECR_REPO_URL_DB`.
-- IDs de Instancias: `EC2_FRONTEND_INSTANCE_ID`, `EC2_BACKEND_INSTANCE_ID`, `EC2_DB_INSTANCE_ID`.
-
----
-
-## 🛠 5. Uso y Ejecución Local
-
-Para levantar el entorno en tu máquina local para desarrollo:
-
-1. **Clonar el repositorio:**
-   ```bash
-   git clone https://github.com/go-cortes/APP-tienda-perritos_Docker_y_Workflow_GITHUB.git
-   cd APP-tienda-perritos_Docker_y_Workflow_GITHUB
-   ```
-
-2. **Construir y levantar los contenedores:**
-   ```bash
-   docker-compose up -d --build
-   ```
-   
-3. **Acceder a la aplicación localmente:**
-   - **Frontend:** http://localhost:3000
-   - **Backend API:** http://localhost:3001
-   - **Base de Datos (MySQL):** Expuesta localmente en el puerto TCP 3306
+## 📊 Monitoreo y Logs
+- **CloudWatch**: Los registros del plano de control de EKS (API Server, Scheduler, Authenticator) se exportan automáticamente a Amazon CloudWatch Logs.
+- **Metrics Server**: Habilitado en el clúster para proveer métricas en tiempo real a Kubernetes (necesario para el funcionamiento del HPA).
